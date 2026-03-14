@@ -4,6 +4,7 @@ import com.kunal.metadata_service.JwtService;
 import com.kunal.metadata_service.dto.FileResponse;
 import com.kunal.metadata_service.entity.UserEntity;
 import com.kunal.metadata_service.service.FileStorageService;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import org.modelmapper.ModelMapper;
@@ -38,36 +39,27 @@ public class FileController {
     ) throws IOException {
 
         FileResponse metadata = storageService.uploadFile(file, currentUser.getId());
-
         return ResponseEntity.ok(metadata);
     }
 
     @GetMapping("/{id}/download")
-    public ResponseEntity<PathResource> downloadFile(
+    public void downloadFile(
             @PathVariable String id,
-            @AuthenticationPrincipal UserEntity currentUser
-    ) {
-
+            @AuthenticationPrincipal UserEntity currentUser,
+            HttpServletResponse response
+    ) throws IOException {
 
         FileResponse metadata = storageService.getMetadata(id);
-
         if (metadata.getOwner().getId() != (currentUser.getId())) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            return;
         }
+        response.setContentType(MediaType.APPLICATION_OCTET_STREAM_VALUE);
+        response.setHeader(HttpHeaders.CONTENT_DISPOSITION,
+                "attachment; filename=\"" + metadata.getFilename() + "\"");
 
-        Path file = storageService.getFile(id);
+        storageService.downloadFile(id, response);
 
-        if (!Files.exists(file)) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
-        }
-
-        PathResource resource = new PathResource(file);
-
-        return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION,
-                        "attachment; filename=" + file.getFileName())
-                .contentType(MediaType.APPLICATION_OCTET_STREAM)
-                .body(resource);
     }
 
     @GetMapping("/my")
@@ -75,7 +67,7 @@ public class FileController {
             @AuthenticationPrincipal UserEntity currentUser,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size
-    ) {
+    ) throws IOException {
 
         Page<FileResponse> files = storageService.getFilesForUser(currentUser.getId(), page, size);
         return ResponseEntity.ok(files);

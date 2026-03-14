@@ -16,7 +16,7 @@ import java.time.LocalDateTime;
 @Table(
         name = "file_metadata",
         indexes = {
-                @Index(name = "idx_owner_id", columnList = "ownerId"),
+                @Index(name = "idx_user_id", columnList = "userId"),
                 @Index(name = "idx_upload_time", columnList = "uploadTime")
         }
 )
