@@ -19,6 +19,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 
+import org.springframework.core.io.Resource;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -48,15 +49,13 @@ public class FileStorageService {
     private final ModelMapper modelMapper;
     private final ChunkService chunkService;
     private final TransactionTemplate transactionTemplate;
+    private final StorageServiceClient storageServiceClient;
     private static final Logger logger = LoggerFactory.getLogger(FileStorageService.class);
     private static final int CHUNK_SIZE = 4 * 1024 * 1024;
     private static final int IO_BUFFER_SIZE = 8 * 1024;
     @Autowired
     @Qualifier("chunkTaskExecutor")
     private Executor chunkTaskExecutor;
-
-    @Value("${file.storage.path}")
-    private String storagePath;
 
     public FileResponse uploadFile(MultipartFile file, long ownerId) throws IOException {
 
@@ -160,19 +159,15 @@ public class FileStorageService {
         try (OutputStream out = response.getOutputStream()) {
             for(FileChunk f: chunks) {
                 String hash = f.getChunk().getChunkHash();
-                String prefix = hash.substring(0,2);
-                Path chunkPath = Paths.get(storagePath, prefix, hash + ".chunk");
-                logger.debug("Reading chunk from path: {}", chunkPath);
-                if (!Files.exists(chunkPath)) {
-                    logger.error("Physical chunk missing at path: {}", chunkPath);
-                    throw new FileNotFoundException("Chunk missing: " + hash);
+                Resource resource = null;
+                try {
+                    resource = storageServiceClient.fetchChunk(f.getChunk().getStorageNodeUrl(), hash);
+                } catch(Exception e) {
+                    logger.error("Node {} down, trying next candidate for download", f.getChunk().getStorageNodeUrl());
+                    throw new RuntimeException(e);
                 }
-                byte[] buffer = new byte[IO_BUFFER_SIZE];
-                try (InputStream fis = Files.newInputStream(chunkPath)) {
-                    int dataRead;
-                    while ((dataRead = fis.read(buffer)) != -1) {
-                        out.write(buffer, 0, dataRead);
-                    }
+                try (InputStream fis = resource.getInputStream()) {
+                    fis.transferTo(out);
                 }
             }
             logger.info("File reconstruction completed for file {}", id);
@@ -202,8 +197,13 @@ public class FileStorageService {
                     logger.debug("Decreased reference count to {} for chunk hash: {}", newCount, hash);
                     if (newCount <= 0) {
                         logger.info("Reference count is 0, deleting physical chunk hash: {}", hash);
-                        deletePhysicalChunk(chunk);
                         chunkRepository.delete(chunk);
+                        try {
+                            storageServiceClient.deleteChunk(mapping.getChunk().getStorageNodeUrl(), hash);
+                        } catch(Exception e) {
+                            logger.error("Node {} down, trying next candidate for download", mapping.getChunk().getStorageNodeUrl());
+                            throw new RuntimeException(e);
+                        }
                     } else {
                         chunkRepository.save(chunk);
                     }
@@ -215,16 +215,5 @@ public class FileStorageService {
         });
     }
 
-    private void deletePhysicalChunk(Chunk chunk) {
-        String hash = chunk.getChunkHash();
-        Path path = Paths.get(storagePath, hash.substring(0, 2), hash + ".chunk");
-        try {
-            logger.debug("Attempting to delete physical file at: {}", path);
-            Files.deleteIfExists(path);
-            logger.debug("Successfully deleted physical file at: {}", path);
-        } catch (IOException e) {
-            logger.error("Failed to delete physical file for chunk: {}", hash);
-        }
-    }
 
 }

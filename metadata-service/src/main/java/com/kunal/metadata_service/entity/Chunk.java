@@ -27,4 +27,6 @@ public class Chunk {
 
     private LocalDateTime createdAt;
 
+    private String storageNodeUrl;
+
 }

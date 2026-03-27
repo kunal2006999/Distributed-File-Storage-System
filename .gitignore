@@ -1,0 +1,36 @@
+# --- Java & Maven ---
+target/
+*.class
+*.jar
+*.war
+*.ear
+
+# --- IntelliJ / IDE ---
+.idea/
+*.iml
+out/
+gen/
+.classpath
+.project
+.settings/
+
+# --- Distributed Storage Specific (The "State") ---
+# This ignores the actual folders where your chunks are stored
+storage-data-*/
+data/
+temp/
+chunks/
+uploads/
+
+# --- Database ---
+# If you use H2 file-based DB, ignore the database files
+*.mv.db
+*.trace.db
+
+# --- Logs ---
+*.log
+logs/
+
+# --- OS Specific ---
+.DS_Store
+Thumbs.db
