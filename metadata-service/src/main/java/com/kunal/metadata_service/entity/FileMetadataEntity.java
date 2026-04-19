@@ -39,4 +39,10 @@ public class FileMetadataEntity {
 
     private Boolean status;
 
+    @Column(nullable = false)
+    private String checksum;
+
+    @Version
+    private Integer version;
+
 }

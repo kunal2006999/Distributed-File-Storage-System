@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  # --- 1. The Database ---
+  db:
+    image: mysql:8.0
+    container_name: dfs-db
+    ports:
+      - "3306:3306"
+    environment:
+      - MYSQL_DATABASE=distributed_file_storage_db
+      - MYSQL_ROOT_PASSWORD=kunsql248#
+    volumes:
+      - ./.mysql-data:/var/lib/mysql
+
+  # --- 2. The Metadata Service ---
+  metadata-app:
+    build: ./metadata-service
+    container_name: metadata-app
+    ports:
+      - "8080:8080"
+    environment:
+      - DB_URL=jdbc:mysql://db:3306/distributed_file_storage_db
+      - DB_USER=root
+      - DB_PASSWORD=kunsql248#
+      # Note: We use service names 'node1' and 'node2' instead of localhost
+      - STORAGE_NODES=http://node1:8080,http://node2:8080
+    depends_on:
+      - db
+      - node1
+      - node2
+
+  # --- 3. Storage Node 1 ---
+  node1:
+    build: ./storage-service
+    container_name: storage-node-1
+    ports:
+      - "8081:8080" # Laptop 8081 -> Container 8080
+    environment:
+      - PORT=8080
+      - STORAGE_PATH=/app/chunks
+    volumes:
+      - ./.storage-data/node-1:/app/chunks
+
+  # --- 4. Storage Node 2 ---
+  node2:
+    build: ./storage-service
+    container_name: storage-node-2
+    ports:
+      - "8082:8080" # Laptop 8082 -> Container 8080
+    environment:
+      - PORT=8080
+      - STORAGE_PATH=/app/chunks
+    volumes:
+      - ./.storage-data/node-2:/app/chunks

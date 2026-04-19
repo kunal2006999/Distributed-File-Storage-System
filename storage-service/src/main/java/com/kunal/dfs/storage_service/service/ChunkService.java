@@ -10,9 +10,7 @@ import org.springframework.stereotype.Service;
 
 import java.io.*;
 import java.net.MalformedURLException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.nio.file.*;
 
 @Service
 @RequiredArgsConstructor
@@ -32,12 +30,12 @@ public class ChunkService {
         boolean fileWasCreated = false;
 
         try {
-            if (!Files.exists(chunkPath)) {
-                Files.write(chunkPath, chunkBytes);
-                fileWasCreated = true;
-            }
+            Files.write(chunkPath, chunkBytes, StandardOpenOption.CREATE_NEW);
+            fileWasCreated = true;
             return fileWasCreated;
-        }  catch (IOException e) {
+        } catch(FileAlreadyExistsException ce) {
+            return false;
+        } catch (IOException e) {
             if (fileWasCreated) {
                 try { Files.deleteIfExists(chunkPath); } catch (IOException ignored) {}
             }

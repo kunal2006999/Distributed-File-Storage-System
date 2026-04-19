@@ -14,8 +14,9 @@ gen/
 .project
 .settings/
 
-# --- Distributed Storage Specific (The "State") ---
-# This ignores the actual folders where your chunks are stored
+# --- Distributed Storage & Docker Persistence (CRITICAL) ---
+.storage-data/
+.mysql-data/
 storage-data-*/
 data/
 temp/
@@ -23,7 +24,6 @@ chunks/
 uploads/
 
 # --- Database ---
-# If you use H2 file-based DB, ignore the database files
 *.mv.db
 *.trace.db
 

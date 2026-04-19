@@ -31,6 +31,9 @@ import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.security.DigestOutputStream;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -57,7 +60,7 @@ public class FileStorageService {
     @Qualifier("chunkTaskExecutor")
     private Executor chunkTaskExecutor;
 
-    public FileResponse uploadFile(MultipartFile file, long ownerId) throws IOException {
+    public FileResponse uploadFile(MultipartFile file, long ownerId) throws IOException, NoSuchAlgorithmException {
 
         String id = UUID.randomUUID().toString();
         boolean success = false;
@@ -69,6 +72,8 @@ public class FileStorageService {
         UserEntity owner = useRepository.findById(ownerId)
                 .orElseThrow(() -> new RuntimeException("User not found with ID: " + ownerId));
 
+        String originalHash = calculateCheckSum(file);
+
         FileMetadataEntity metadata = FileMetadataEntity.builder()
                 .id(id)
                 .filename(file.getOriginalFilename())
@@ -77,6 +82,7 @@ public class FileStorageService {
                 .owner(owner)
                 .uploadTime(LocalDateTime.now())
                 .status(Boolean.FALSE)
+                .checksum(originalHash)
                 .build();
 
         repository.save(metadata);
@@ -147,7 +153,7 @@ public class FileStorageService {
         return modelMapper.map(metadata, FileResponse.class);
     }
 
-    public void downloadFile(String id, HttpServletResponse response) {
+    public void downloadFile(String id, HttpServletResponse response) throws NoSuchAlgorithmException {
 
         logger.info("Initiating download for FileId: {}", id);
         FileMetadataEntity metadata = repository.findById(id)
@@ -156,7 +162,9 @@ public class FileStorageService {
         List<FileChunk> chunks =
                 fileChunkRepository.findByFileIdOrderByChunkOrder(id);
         logger.debug("Found {} chunks for FileId: {}", chunks.size(), id);
+        MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
         try (OutputStream out = response.getOutputStream()) {
+            DigestOutputStream dos = new DigestOutputStream(out, sha256);
             for(FileChunk f: chunks) {
                 String hash = f.getChunk().getChunkHash();
                 Resource resource = null;
@@ -167,11 +175,16 @@ public class FileStorageService {
                     throw new RuntimeException(e);
                 }
                 try (InputStream fis = resource.getInputStream()) {
-                    fis.transferTo(out);
+                    fis.transferTo(dos);
                 }
             }
+            byte[] digest = sha256.digest();
+            String reconstructedHash = bytesToHex(digest);
+            if (!reconstructedHash.equals(metadata.getChecksum())) {
+                logger.error("INTEGRITY CRITICAL: File {} is corrupted!", id);
+            }
             logger.info("File reconstruction completed for file {}", id);
-            out.flush();
+            dos.flush();
         } catch (IOException e) {
             logger.error("IOException during file download for FileId: {}", id, e);
             e.printStackTrace();
@@ -213,6 +226,32 @@ public class FileStorageService {
             repository.deleteById(fileId);
             return null;
         });
+    }
+
+    public String calculateCheckSum(MultipartFile file) throws NoSuchAlgorithmException {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        try(InputStream in = file.getInputStream()) {
+            byte[] buffer = new byte[IO_BUFFER_SIZE];
+            int dataRead;
+            while ((dataRead = in.read(buffer)) != -1) {
+                digest.update(buffer, 0, dataRead);
+            }
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        StringBuilder sb = new StringBuilder();
+        for(byte b: digest.digest()) {
+            sb.append(String.format("%02x", b));
+        }
+        return sb.toString();
+    }
+
+    public String bytesToHex(byte[] digest) throws NoSuchAlgorithmException {
+        StringBuilder sb = new StringBuilder();
+        for(byte b: digest) {
+            sb.append(String.format("%02x", b));
+        }
+        return sb.toString();
     }
 
 

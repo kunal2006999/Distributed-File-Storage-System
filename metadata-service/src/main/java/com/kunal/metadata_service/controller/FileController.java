@@ -21,6 +21,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.NoSuchAlgorithmException;
 import java.util.List;
 
 @RestController
@@ -36,7 +37,7 @@ public class FileController {
     public ResponseEntity<FileResponse> uploadFile(
             @RequestParam @NotNull MultipartFile file,
             @AuthenticationPrincipal UserEntity currentUser
-    ) throws IOException {
+    ) throws IOException, NoSuchAlgorithmException {
 
         FileResponse metadata = storageService.uploadFile(file, currentUser.getId());
         return ResponseEntity.ok(metadata);
@@ -47,7 +48,7 @@ public class FileController {
             @PathVariable String id,
             @AuthenticationPrincipal UserEntity currentUser,
             HttpServletResponse response
-    ) throws IOException {
+    ) throws IOException, NoSuchAlgorithmException {
 
         FileResponse metadata = storageService.getMetadata(id);
         if (metadata.getOwner().getId() != (currentUser.getId())) {

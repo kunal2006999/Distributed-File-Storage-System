@@ -11,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
 import java.io.File;
@@ -74,20 +75,23 @@ public class ChunkService {
             throw new RuntimeException("Upload failed: No available storage nodes.");
         }
 
-        Chunk chunk = chunkRepository.findByChunkHash(hash)
-                .map(existingChunk -> {
-                    existingChunk.setReferenceCount(existingChunk.getReferenceCount() + 1);
-                    return chunkRepository.save(existingChunk);
-                })
-                .orElseGet(() -> {
-                    Chunk newChunk = new Chunk();
-                    newChunk.setChunkHash(hash);
-                    newChunk.setSize((long) chunkBytes.length);
-                    newChunk.setReferenceCount(1);
-                    newChunk.setCreatedAt(LocalDateTime.now());
-                    newChunk.setStorageNodeUrl(url);
-                    return chunkRepository.save(newChunk);
-                });
+        Chunk chunk;
+        try {
+            Chunk newChunk = new Chunk();
+            newChunk.setChunkHash(hash);
+            newChunk.setSize((long) chunkBytes.length);
+            newChunk.setReferenceCount(1);
+            newChunk.setCreatedAt(LocalDateTime.now());
+            newChunk.setStorageNodeUrl(url);
+            chunk = chunkRepository.save(newChunk);
+
+        } catch (DataIntegrityViolationException e) {
+            chunk = chunkRepository.findByChunkHash(hash)
+                    .orElseThrow(() -> new RuntimeException("Chunk exists but not found"));
+
+            chunk.setReferenceCount(chunk.getReferenceCount() + 1);
+            chunk = chunkRepository.save(chunk);
+        }
 
         FileMetadataEntity file = fileMetadataRepository.findById(fileId)
                 .orElseThrow(() -> new RuntimeException("File not found with id: " + fileId));
