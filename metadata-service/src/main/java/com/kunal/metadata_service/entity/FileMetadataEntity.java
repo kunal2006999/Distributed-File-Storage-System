@@ -45,4 +45,8 @@ public class FileMetadataEntity {
     @Version
     private Integer version;
 
+    private boolean deleted = false;
+
+    private LocalDateTime deletedAt;
+
 }

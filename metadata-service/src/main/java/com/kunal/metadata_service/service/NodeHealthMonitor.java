@@ -30,8 +30,7 @@ public class NodeHealthMonitor {
     private Set<String> activeNodes =  Collections.newSetFromMap(new ConcurrentHashMap<>());
 
     @Scheduled(fixedRate = 20000)
-    @PostConstruct
-    public void checkNodesHealth() {
+    public synchronized void checkNodesHealth() {
         logger.debug("Janitor: Starting health check for {} nodes", masterNodes.size());
         for(String node: masterNodes) {
             boolean isAvailable = pingNode(node);
@@ -61,6 +60,11 @@ public class NodeHealthMonitor {
             logger.error("Health check failed for {}: {}", nodeUrl, e.getMessage());
             return false;
         }
+    }
+
+    @PostConstruct
+    public void init() {
+        checkNodesHealth();
     }
 
 }

@@ -5,6 +5,8 @@ import lombok.*;
 import org.hibernate.annotations.ColumnDefault;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Getter
@@ -27,6 +29,15 @@ public class Chunk {
 
     private LocalDateTime createdAt;
 
-    private String storageNodeUrl;
+    @OneToMany(mappedBy = "chunk", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<ChunkLocation> locations = new ArrayList<>();
+
+    public void addLocation(ChunkLocation location) {
+        if (this.locations == null) {
+            this.locations = new ArrayList<>();
+        }
+        this.locations.add(location);
+        location.setChunk(this); // This is the crucial line! It links the location back to this chunk.
+    }
 
 }

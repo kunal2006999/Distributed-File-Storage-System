@@ -1,14 +1,8 @@
 package com.kunal.metadata_service.service;
 
 import com.kunal.metadata_service.dto.FileResponse;
-import com.kunal.metadata_service.entity.Chunk;
-import com.kunal.metadata_service.entity.FileChunk;
-import com.kunal.metadata_service.entity.FileMetadataEntity;
-import com.kunal.metadata_service.entity.UserEntity;
-import com.kunal.metadata_service.repository.ChunkRepository;
-import com.kunal.metadata_service.repository.FileChunkRepository;
-import com.kunal.metadata_service.repository.FileMetadataRepository;
-import com.kunal.metadata_service.repository.UserRepository;
+import com.kunal.metadata_service.entity.*;
+import com.kunal.metadata_service.repository.*;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
@@ -28,17 +22,11 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.*;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.security.DigestOutputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 
@@ -49,13 +37,17 @@ public class FileStorageService {
     private final UserRepository useRepository;
     private final FileChunkRepository fileChunkRepository;
     private final ChunkRepository chunkRepository;
+    private final ChunkLocationRepository chunkLocationRepository;
     private final ModelMapper modelMapper;
     private final ChunkService chunkService;
     private final TransactionTemplate transactionTemplate;
     private final StorageServiceClient storageServiceClient;
     private static final Logger logger = LoggerFactory.getLogger(FileStorageService.class);
-    private static final int CHUNK_SIZE = 4 * 1024 * 1024;
     private static final int IO_BUFFER_SIZE = 8 * 1024;
+
+    @Value("${storage.chunk.size:4194304}")
+    private int CHUNK_SIZE;
+
     @Autowired
     @Qualifier("chunkTaskExecutor")
     private Executor chunkTaskExecutor;
@@ -140,7 +132,7 @@ public class FileStorageService {
 
         Pageable pageable = PageRequest.of(page, size);
 
-        Page<FileMetadataEntity> files = repository.findByOwnerId(userId, pageable);
+        Page<FileMetadataEntity> files = repository.findByOwnerIdAndDeletedFalse(userId, pageable);
         logger.info("Fetching files for user {}", userId);
 
         return files.map(file -> modelMapper.map(file, FileResponse.class));
@@ -168,11 +160,30 @@ public class FileStorageService {
             for(FileChunk f: chunks) {
                 String hash = f.getChunk().getChunkHash();
                 Resource resource = null;
-                try {
-                    resource = storageServiceClient.fetchChunk(f.getChunk().getStorageNodeUrl(), hash);
-                } catch(Exception e) {
-                    logger.error("Node {} down, trying next candidate for download", f.getChunk().getStorageNodeUrl());
-                    throw new RuntimeException(e);
+                boolean chunkDownloaded = false;
+
+                List<ChunkLocation> locations = chunkLocationRepository.findByChunk(f.getChunk());
+                locations.sort(Comparator.comparing(loc -> loc.getRole() == ReplicaRole.PRIMARY ? 0 : 1));
+                Set<String> attemptedNodes = new HashSet<>();
+
+                for(ChunkLocation location: locations) {
+                    String nodeUrl = location.getStorageNodeUrl();
+                    if (!attemptedNodes.add(nodeUrl)) continue;
+
+                    try {
+                        logger.debug("Attempting to fetch chunk {} from {} node: {}", hash, location.getRole(), nodeUrl);
+                        resource = storageServiceClient.fetchChunk(nodeUrl, hash);
+                        logger.info("Successfully fetched chunk {} from {} node: {}", hash, location.getRole(), nodeUrl);
+                        chunkDownloaded = true;
+                        break;
+                    } catch(Exception e) {
+                        logger.warn("Failed to fetch chunk {} from node {}. Trying next replica.", hash, nodeUrl);
+                        //logger.error("Node {} down, trying next candidate for download"); //f.getChunk().getStorageNodeUrl());
+                    }
+                }
+                if(!chunkDownloaded || resource == null) {
+                    logger.error("CRITICAL: All replicas failed to serve chunk {}", hash);
+                    throw new RuntimeException("Download failed: Chunk " + hash + " is unavailable on all storage nodes.");
                 }
                 try (InputStream fis = resource.getInputStream()) {
                     fis.transferTo(dos);
@@ -192,36 +203,54 @@ public class FileStorageService {
     }
 
     @Transactional
+    public void softDeleteFile(String fileId, Long userId) {
+        FileMetadataEntity file = repository.findById(fileId)
+                .orElseThrow(() -> new RuntimeException("File not found"));
+
+        if (file.getOwner().getId() != userId) {
+            throw new IllegalArgumentException("You do not have permission to delete this file.");
+        }
+
+        file.setDeleted(true);
+        file.setDeletedAt(LocalDateTime.now());
+        repository.save(file);
+
+        logger.info("File {} soft-deleted by user {}", fileId, userId);
+    }
+
+    @Transactional
     public void cleanupFailedUpload(String fileId) {
         transactionTemplate.execute(status -> {
             logger.warn("Cleaning up failed upload for file: {}", fileId);
             List<FileChunk> mappings = fileChunkRepository.findByFileId(fileId);
             logger.debug("Found {} chunk mappings to clean up for FileId: {}", mappings.size(), fileId);
 
-            logger.debug("Deleting file chunks mapping for FileId: {}", fileId);
-            fileChunkRepository.deleteByFileId(fileId);
-            fileChunkRepository.flush();
-
             for (FileChunk mapping : mappings) {
                 String hash = mapping.getChunk().getChunkHash();
                 chunkRepository.findByChunkHash(hash).ifPresent(chunk -> {
                     int newCount = chunk.getReferenceCount() - 1;
-                    chunk.setReferenceCount(newCount);
-                    logger.debug("Decreased reference count to {} for chunk hash: {}", newCount, hash);
                     if (newCount <= 0) {
                         logger.info("Reference count is 0, deleting physical chunk hash: {}", hash);
-                        chunkRepository.delete(chunk);
                         try {
-                            storageServiceClient.deleteChunk(mapping.getChunk().getStorageNodeUrl(), hash);
+                            List<ChunkLocation> locations = chunk.getLocations();
+                            for (ChunkLocation location: locations) storageServiceClient.deleteChunk(location.getStorageNodeUrl(), hash);
+                            chunkRepository.delete(chunk);
                         } catch(Exception e) {
-                            logger.error("Node {} down, trying next candidate for download", mapping.getChunk().getStorageNodeUrl());
-                            throw new RuntimeException(e);
+                            logger.error("Failed to physically delete chunk {} from storage nodes", hash, e);
+                            throw new RuntimeException("Chunk physical deletion failed, aborting DB rollback", e);
                         }
                     } else {
+                        chunk.setReferenceCount(newCount);
+                        logger.debug("Decreased reference count to {} for chunk hash: {}", newCount, hash);
                         chunkRepository.save(chunk);
                     }
                 });
             }
+
+            logger.debug("Deleting file chunks mapping for FileId: {}", fileId);
+            fileChunkRepository.deleteByFileId(fileId);
+            fileChunkRepository.flush();
+
             logger.debug("Deleting file metadata for FileId: {}", fileId);
             repository.deleteById(fileId);
             return null;

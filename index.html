@@ -108,7 +108,7 @@
         }
     };
 
-// --- TOGGLE LOGIN / SIGNUP ---
+    // --- TOGGLE LOGIN / SIGNUP ---
     function toggleAuth(view) {
         if (view === 'signup') {
             document.getElementById('login-section').classList.add('hidden');
@@ -126,14 +126,13 @@
         const email = document.getElementById('reg-email').value;
         const password = document.getElementById('reg-password').value;
 
-        // Basic validation
         if (!name || !username || !email || !password) {
             document.getElementById('signup-message').style.color = 'red';
             document.getElementById('signup-message').innerText = "Please fill all fields.";
             return;
         }
 
-        const response = await fetch(`${API_BASE_URL}/users`, {
+        const response = await fetch(`${API_BASE_URL}/users/signup`, { // Updated to match your /signup endpoint
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name, username, email, password })
@@ -143,14 +142,13 @@
             document.getElementById('signup-message').style.color = 'green';
             document.getElementById('signup-message').innerText = "Account created! Redirecting to login...";
             
-            // Wait 1.5 seconds, then switch to the login screen automatically
             setTimeout(() => {
                 toggleAuth('login');
-                document.getElementById('username').value = username; // Pre-fill username for convenience
+                document.getElementById('username').value = username; 
             }, 1500);
         } else {
             document.getElementById('signup-message').style.color = 'red';
-            document.getElementById('signup-message').innerText = "Signup failed. Username might be taken.";
+            document.getElementById('signup-message').innerText = "Signup failed. Username might be taken or validation failed.";
         }
     }
 
@@ -167,7 +165,7 @@
 
         if (response.ok) {
             const data = await response.json();
-            localStorage.setItem("jwt_token", data.token); // Save token to browser
+            localStorage.setItem("jwt_token", data.token); 
             document.getElementById('login-error').innerText = "";
             showDashboard();
             fetchFiles(0);
@@ -177,7 +175,7 @@
     }
 
     function logout() {
-        localStorage.removeItem("jwt_token"); // The "Soft Logout"
+        localStorage.removeItem("jwt_token"); 
         document.getElementById('login-section').classList.remove('hidden');
         document.getElementById('dashboard-section').classList.add('hidden');
         document.getElementById('file-list').innerHTML = "";
@@ -186,7 +184,6 @@
     // --- FILE OPERATIONS ---
     async function fetchFiles(page) {
         const token = localStorage.getItem("jwt_token");
-        // Using the new pagination parameters!
         const response = await fetch(`${API_BASE_URL}/files/my?page=${page}&size=${pageSize}`, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
@@ -195,25 +192,27 @@
             const pageData = await response.json();
             renderFiles(pageData);
         } else if (response.status === 401 || response.status === 403) {
-            logout(); // Token expired or invalid
+            logout(); 
         }
     }
 
     function renderFiles(pageData) {
         const tbody = document.getElementById('file-list');
-        tbody.innerHTML = ""; // Clear table
+        tbody.innerHTML = ""; 
 
-        // Access the paginated 'content' array
         pageData.content.forEach(file => {
+            // Added the Delete button here!
             const row = `<tr>
                 <td>${file.filename}</td>
                 <td>${file.size}</td>
-                <td><button onclick="downloadFile('${file.id}', '${file.filename}')">Download</button></td>
+                <td>
+                    <button onclick="downloadFile('${file.id}', '${file.filename}')">Download</button>
+                    <button onclick="deleteFile('${file.id}')" style="background-color: #dc3545; margin-left: 5px;">Delete</button>
+                </td>
             </tr>`;
             tbody.innerHTML += row;
         });
 
-        // Update Pagination UI
         currentPage = pageData.pageable.pageNumber;
         document.getElementById('page-info').innerText = `Page ${currentPage + 1} of ${pageData.totalPages || 1}`;
         document.getElementById('btn-prev').disabled = pageData.first;
@@ -240,18 +239,16 @@
 
         if (response.ok) {
             alert("File uploaded successfully!");
-            fileInput.value = ""; // Reset input
-            fetchFiles(0); // Refresh list back to page 1
+            fileInput.value = ""; 
+            fetchFiles(0); 
         } else {
             alert("Upload failed.");
         }
     }
 
-    // --- SECURE DOWNLOAD TRICK ---
     async function downloadFile(id, filename) {
         const token = localStorage.getItem("jwt_token");
         
-        // We must use fetch() to send the Auth header. An standard <a href> tag cannot send JWTs.
         const response = await fetch(`${API_BASE_URL}/files/${id}/download`, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
@@ -268,6 +265,28 @@
             window.URL.revokeObjectURL(downloadUrl);
         } else {
             alert("Download failed.");
+        }
+    }
+
+    // --- NEW: DELETE FILE LOGIC ---
+    async function deleteFile(id) {
+        // Built-in browser confirmation dialog
+        if (!confirm("Are you sure you want to delete this file?")) {
+            return; 
+        }
+
+        const token = localStorage.getItem("jwt_token");
+        
+        const response = await fetch(`${API_BASE_URL}/files/${id}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (response.ok) {
+            alert("File deleted successfully!");
+            fetchFiles(currentPage); // Refresh the table to show the file is gone
+        } else {
+            alert("Failed to delete file.");
         }
     }
 

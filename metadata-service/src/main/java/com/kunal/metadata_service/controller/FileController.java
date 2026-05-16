@@ -5,6 +5,8 @@ import com.kunal.metadata_service.dto.FileResponse;
 import com.kunal.metadata_service.entity.UserEntity;
 import com.kunal.metadata_service.service.FileStorageService;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import org.modelmapper.ModelMapper;
@@ -15,6 +17,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -28,6 +31,7 @@ import java.util.List;
 @RequestMapping("/files")
 @RequiredArgsConstructor
 @CrossOrigin(origins = "*")
+@Validated
 public class FileController {
     private final FileStorageService storageService;
     private final ModelMapper modelMapper;
@@ -35,9 +39,13 @@ public class FileController {
 
     @PostMapping("/upload")
     public ResponseEntity<FileResponse> uploadFile(
-            @RequestParam @NotNull MultipartFile file,
+            @RequestParam @NotNull(message = "File is required") MultipartFile file,
             @AuthenticationPrincipal UserEntity currentUser
     ) throws IOException, NoSuchAlgorithmException {
+
+        if (file.isEmpty()) {
+            throw new IllegalArgumentException("Cannot upload an empty file");
+        }
 
         FileResponse metadata = storageService.uploadFile(file, currentUser.getId());
         return ResponseEntity.ok(metadata);
@@ -45,7 +53,7 @@ public class FileController {
 
     @GetMapping("/{id}/download")
     public void downloadFile(
-            @PathVariable String id,
+            @PathVariable @NotBlank(message = "File ID cannot be blank") String id,
             @AuthenticationPrincipal UserEntity currentUser,
             HttpServletResponse response
     ) throws IOException, NoSuchAlgorithmException {
@@ -63,11 +71,20 @@ public class FileController {
 
     }
 
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deleteFile(
+            @PathVariable @NotBlank String id,
+            @AuthenticationPrincipal UserEntity currentUser
+    ) {
+        storageService.softDeleteFile(id, currentUser.getId());
+        return ResponseEntity.noContent().build(); // 204 No Content is standard for successful deletes
+    }
+
     @GetMapping("/my")
     public ResponseEntity<Page<FileResponse>> getMyFiles(
             @AuthenticationPrincipal UserEntity currentUser,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size
+            @RequestParam(defaultValue = "0") @Min(value = 0, message = "Page index must not be less than zero") int page,
+            @RequestParam(defaultValue = "10") @Min(value = 1, message = "Page size must not be less than one") int size
     ) throws IOException {
 
         Page<FileResponse> files = storageService.getFilesForUser(currentUser.getId(), page, size);

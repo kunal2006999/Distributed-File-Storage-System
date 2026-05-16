@@ -6,7 +6,7 @@ services:
     image: mysql:8.0
     container_name: dfs-db
     ports:
-      - "3306:3306"
+      - "3307:3306"
     environment:
       - MYSQL_DATABASE=distributed_file_storage_db
       - MYSQL_ROOT_PASSWORD=kunsql248#
