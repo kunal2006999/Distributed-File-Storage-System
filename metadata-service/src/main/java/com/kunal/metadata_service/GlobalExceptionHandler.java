@@ -2,6 +2,7 @@ package com.kunal.metadata_service;
 
 import com.kunal.metadata_service.dto.ErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -20,11 +21,18 @@ public class GlobalExceptionHandler {
      * Handles general RuntimeExceptions (like the ones you threw for Replication Failures)
      */
     @ExceptionHandler(RuntimeException.class)
-    public ResponseEntity<ErrorResponse> handleRuntimeException(RuntimeException ex, HttpServletRequest request) {
-        // 1. Log the error centrally so you don't lose it!
+    public ResponseEntity<ErrorResponse> handleRuntimeException(RuntimeException ex, HttpServletRequest request, HttpServletResponse response) {
+
+        // 1. SAFETY VALVE: If we already sent the 200 OK headers for a file download, we must abort cleanly.
+        if (response.isCommitted()) {
+            logger.error("Download failed mid-stream. Connection dropped. Error: {}", ex.getMessage());
+            return null; // Returning null tells Spring: "Drop the connection, do not attempt to send JSON."
+        }
+
+        // 2. Log the error centrally so you don't lose it!
         logger.error("Runtime exception caught: {}", ex.getMessage(), ex);
 
-        // 2. Build your standard response
+        // 3. Build your standard response
         ErrorResponse errorResponse = new ErrorResponse(
                 LocalDateTime.now(),
                 HttpStatus.INTERNAL_SERVER_ERROR.value(), // 500
@@ -32,7 +40,7 @@ public class GlobalExceptionHandler {
                 request.getRequestURI() // Automatically gets the path, e.g., "/files/upload"
         );
 
-        // 3. Return it to the user
+        // 4. Return it to the user
         return new ResponseEntity<>(errorResponse, HttpStatus.INTERNAL_SERVER_ERROR);
     }
 

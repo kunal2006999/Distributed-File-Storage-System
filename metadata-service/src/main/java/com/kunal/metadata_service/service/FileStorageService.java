@@ -231,13 +231,17 @@ public class FileStorageService {
                     int newCount = chunk.getReferenceCount() - 1;
                     if (newCount <= 0) {
                         logger.info("Reference count is 0, deleting physical chunk hash: {}", hash);
-                        try {
-                            List<ChunkLocation> locations = chunk.getLocations();
-                            for (ChunkLocation location: locations) storageServiceClient.deleteChunk(location.getStorageNodeUrl(), hash);
-                            chunkRepository.delete(chunk);
-                        } catch(Exception e) {
-                            logger.error("Failed to physically delete chunk {} from storage nodes", hash, e);
-                            throw new RuntimeException("Chunk physical deletion failed, aborting DB rollback", e);
+                        List<ChunkLocation> locations = chunk.getLocations();
+                        for (ChunkLocation location : locations) {
+                            try {
+                                storageServiceClient.deleteChunk(location.getStorageNodeUrl(), hash);
+                                chunkRepository.delete(chunk);
+                            } catch (Exception e) {
+                                // DO NOT throw an exception here!
+                                // If the node is dead, we just log it and move on so the DB still rolls back.
+                                logger.warn("Could not delete chunk {} on node {}. Node might be down. Moving on...",
+                                        chunk.getChunkHash(), location.getStorageNodeUrl());
+                            }
                         }
                     } else {
                         chunk.setReferenceCount(newCount);
