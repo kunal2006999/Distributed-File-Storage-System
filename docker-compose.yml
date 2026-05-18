@@ -9,7 +9,7 @@ services:
       - "3307:3306"
     environment:
       - MYSQL_DATABASE=distributed_file_storage_db
-      - MYSQL_ROOT_PASSWORD=kunsql248#
+      - MYSQL_ROOT_PASSWORD=${DB_ROOT_PASSWORD}
     volumes:
       - ./.mysql-data:/var/lib/mysql
 
@@ -22,7 +22,8 @@ services:
     environment:
       - DB_URL=jdbc:mysql://db:3306/distributed_file_storage_db
       - DB_USER=root
-      - DB_PASSWORD=kunsql248#
+      - DB_PASSWORD=${DB_ROOT_PASSWORD} # Pulls from .env
+      - JWT_SECRET=${JWT_SECRET_KEY}
       # Note: We use service names 'node1' and 'node2' instead of localhost
       - STORAGE_NODES=http://node1:8080,http://node2:8080
     depends_on:

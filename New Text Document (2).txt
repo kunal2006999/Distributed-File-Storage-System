@@ -1,0 +1,5 @@
+# Database Secrets
+DB_ROOT_PASSWORD=kunsql248#
+
+# JWT Secrets (Make sure it's at least 32 characters long!)
+JWT_SECRET_KEY=mysecretkeymysecretkeymysecretkeymysecretkey
